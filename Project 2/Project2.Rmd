@@ -5,10 +5,10 @@ output:
     df_print: paged
 ---
 
-#Data Preprocessing
+# Data Preprocessing
 
-###Packages
-```{r, echo=FALSE, include=FALSE}
+### Packages
+```{r, echo=FALSE}
 library(dplyr)            # data manipulation
 library(plyr)             # modeling
 library(knitr)            # stlying/rmd
@@ -24,20 +24,20 @@ library(ranger)           # modeling
 library(xgboost)          # modeling
 ```
 
-###Load Data
+### Load Data
 ```{r}
 data = read.csv("https://raw.githubusercontent.com/hvasquez81/Data-624/master/Project%202/StudentData%20-%20TO%20MODEL.csv")
 str(data) 
 ```
 
-###Summary of Data
+### Summary of Data
 ```{r}
 #remove records where pH is null
 data = data %>%
   filter(!is.na(PH))
 ```
 
-#NAs
+# NAs
 ```{r}
 #check for NA's and distribution of vars
 NA_summary = data %>%
@@ -52,7 +52,7 @@ NA_summary %>%
   kable_styling()
 ```
 
-###0's
+### 0's
 ```{r}
 data.zero = data %>%
   group_by(.) %>%
@@ -73,7 +73,7 @@ data.zero %>%
 
 ```
 
-###Create new variable HydPressureRecorded123 
+### Create new variable HydPressureRecorded123 
 ```{r}
 data = data %>%
   mutate(HydPressureRecorded123 =ifelse( ( (!is.na(Hyd.Pressure1) & Hyd.Pressure1 !=0 ) |
@@ -84,7 +84,7 @@ data = data %>%
 data$HydPressureRecorded123 = as.factor(data$HydPressureRecorded123)
 ```
 
-###Variable distribution
+### Variable distribution
 ```{r}
 data %>%
   keep(is.numeric) %>%
@@ -92,12 +92,12 @@ data %>%
   ggplot(aes(value)) + 
   facet_wrap(~ key, scales = "free") + 
   geom_histogram(aes(fill=key)) + 
-  theme(legend.position = "none")
+  theme(legend.position = "none") +
   theme_classic()
     
 ```
 
-###Categorical Variable Distribution
+### Categorical Variable Distribution
 ```{r}
 #replace blank brand code with E for empty
 data$Brand.Code = as.character(data$Brand.Code)
@@ -124,7 +124,7 @@ ggplot(HydPressureRecorded123_cnt, aes(x=HydPressureRecorded123, y=n, fill = Hyd
   theme_classic()
 ```
 
-###Correlation Matrix
+### Correlation Matrix
 ```{r}
 #use numeric variables
 numeric_data = data %>%
@@ -162,6 +162,7 @@ test = data[-train_rows, ]
 
 ### Multiple Linear Regression Model
 ```{r}
+set.seed(1234)
 current.time = proc.time()
 linear.mod = caret::train(PH~., 
                           data = train, 
@@ -181,6 +182,7 @@ plot(linear.mod$finalModel)
 
 ### SVM
 ```{r}
+set.seed(1234)
 current.time = proc.time()
 svm.mod = caret::train(PH~., 
                        data = train, 
@@ -200,6 +202,7 @@ plot(svm.mod)
 
 ### kNN
 ```{r}
+set.seed(1234)
 current.time = proc.time()
 knn.mod = caret::train(PH~., 
                        data = train, 
@@ -220,6 +223,7 @@ plot(knn.mod)
 
 ### Random Forest
 ```{r}
+set.seed(1234)
 current.time = proc.time()
 rf.mod = caret::train(PH~., 
                           data = train, 
@@ -237,6 +241,7 @@ plot(rf.mod)
 
 ### Ranger
 ```{r}
+set.seed(1234)
 current.time = proc.time()
 ranger.mod = caret::train(PH~., 
                           data = train, 
@@ -255,6 +260,7 @@ plot(ranger.mod)
 
 ### Boost
 ```{r,warning=FALSE}
+set.seed(1234)
 current.time = proc.time()
 boost.mod = caret::train(PH~., 
                           data = train, 
@@ -343,7 +349,7 @@ test_rsquared = ggplot( models.metrics, aes(x=Model, y=RSquared, fill = Model) )
 test_rsquared
 ```
 
-#Display - MAE
+# Display - MAE
 ```{r}
 test_mae = ggplot( models.metrics, aes(x=Model, y=MAE, fill = Model) ) + 
   geom_bar(stat="identity") +
@@ -433,7 +439,7 @@ eval = eval %>% mutate(PH_RANGER_PREDICTION = predict(ranger.mod, newdata = eval
 #write.csv(eval, "Group5_pH_Eval_Predictions.csv")
 ```
 
-#Sources
+# Sources
 https://rdrr.io/cran/caret/man/models.html
 http://www.rebeccabarter.com/blog/2017-11-17-caret_tutorial/
 https://cran.r-projecZt.org/web/packages/ranger/ranger.pdf
