@@ -1,0 +1,442 @@
+---
+title: "Project 2 - Group 5 - Data 624"
+output:
+  html_document:
+    df_print: paged
+---
+
+#Data Preprocessing
+
+###Packages
+```{r, echo=FALSE, include=FALSE}
+library(dplyr)            # data manipulation
+library(plyr)             # modeling
+library(knitr)            # stlying/rmd
+library(kableExtra)       # stlying
+library(ggplot2)          # visualization
+library(purrr)            #
+library(tidyr)            #
+library(corrplot)         # correlation plot
+library(MASS)             #
+library(caret)            # modeling
+library(e1071)            # modeling
+library(ranger)           # modeling
+library(xgboost)          # modeling
+```
+
+###Load Data
+```{r}
+data = read.csv("https://raw.githubusercontent.com/hvasquez81/Data-624/master/Project%202/StudentData%20-%20TO%20MODEL.csv")
+str(data) 
+```
+
+###Summary of Data
+```{r}
+#remove records where pH is null
+data = data %>%
+  filter(!is.na(PH))
+```
+
+#NAs
+```{r}
+#check for NA's and distribution of vars
+NA_summary = data %>%
+  summarise_all( funs( round( sum( 100*is.na(.)/nrow(data) ), 2) ) ) %>%
+  t()
+NA_summary = cbind(as.character( rownames(NA_summary) ), data.frame(NA_summary, row.names=NULL))
+colnames(NA_summary) = c("Variable", "Percent of NAs")
+NA_summary %>%
+  arrange( desc(`Percent of NAs`) ) %>%
+  head(10) %>%
+  kable() %>%
+  kable_styling()
+```
+
+###0's
+```{r}
+data.zero = data %>%
+  group_by(.) %>%
+  summarise_each(funs(sum(.==0, na.rm = TRUE))) %>%
+  t() %>%
+  as.data.frame()
+
+data.zero = as.data.frame(cbind(rownames(data.zero), data.zero))
+rownames(data.zero) = c()
+colnames(data.zero) = c('Variable', 'Zero Count')
+
+data.zero %>% 
+  arrange(desc(`Zero Count`)) %>%
+  head(5) %>%
+  ggplot(aes(x=Variable, y=`Zero Count`, fill = Variable)) + 
+  geom_bar(stat="identity") +
+  theme_classic()
+
+```
+
+###Create new variable HydPressureRecorded123 
+```{r}
+data = data %>%
+  mutate(HydPressureRecorded123 =ifelse( ( (!is.na(Hyd.Pressure1) & Hyd.Pressure1 !=0 ) |
+                                            (!is.na(Hyd.Pressure2) & Hyd.Pressure2 !=0 ) |
+                                              (!is.na(Hyd.Pressure3) & Hyd.Pressure3 !=0 ) ), 1, 0)
+  )
+#change to factor
+data$HydPressureRecorded123 = as.factor(data$HydPressureRecorded123)
+```
+
+###Variable distribution
+```{r}
+data %>%
+  keep(is.numeric) %>%
+  gather() %>%
+  ggplot(aes(value)) + 
+  facet_wrap(~ key, scales = "free") + 
+  geom_histogram(aes(fill=key)) + 
+  theme(legend.position = "none")
+  theme_classic()
+    
+```
+
+###Categorical Variable Distribution
+```{r}
+#replace blank brand code with E for empty
+data$Brand.Code = as.character(data$Brand.Code)
+data$Brand.Code[is.na(data$Brand.Code)] = "E"
+data$Brand.Code[data$Brand.Code == ""] = "E"
+data$Brand.Code = as.factor(data$Brand.Code)
+
+brand_cnt = data %>% 
+  group_by(Brand.Code) %>% 
+  tally()
+
+ggplot(brand_cnt, aes(x=Brand.Code, y=n, fill = Brand.Code)) + 
+  geom_bar(stat="identity") +
+  theme_classic()
+```
+
+```{r}
+HydPressureRecorded123_cnt = data %>% 
+  group_by(HydPressureRecorded123) %>% 
+  tally()
+
+ggplot(HydPressureRecorded123_cnt, aes(x=HydPressureRecorded123, y=n, fill = HydPressureRecorded123)) + 
+  geom_bar(stat="identity") +
+  theme_classic()
+```
+
+###Correlation Matrix
+```{r}
+#use numeric variables
+numeric_data = data %>%
+  keep(is.numeric)
+#create correlation matrix
+corrplot(cor(numeric_data, use = "complete.obs"),
+         type = "lower",
+         method = "circle")
+```
+
+# Modeling
+
+## Data imputation
+```{r}
+#replace na function
+NA_replace <- function(x) replace(x, is.na(x), mean(x, na.rm = TRUE))
+
+
+#removes categorical variables and then replaces NAs of numeric variables with column means
+data[, !( colnames(data) %in% c('Brand.Code', 'HydPressureRecorded123') ) ] = replace(data[, !( colnames(data) %in% c('Brand.Code', 'HydPressureRecorded123') ) ], TRUE, lapply(data[, !( colnames(data) %in% c('Brand.Code', 'HydPressureRecorded123') ) ], NA_replace ))
+  
+```
+
+## Train Test Split
+```{r}
+train_size = floor(0.8*nrow(data))
+
+set.seed(1234)
+train_rows = sample(seq_len(nrow(data)), size = train_size)
+train = data[train_rows, ]
+test = data[-train_rows, ]
+```
+
+## Linear
+
+### Multiple Linear Regression Model
+```{r}
+current.time = proc.time()
+linear.mod = caret::train(PH~., 
+                          data = train, 
+                          method = "lm",
+                          preProc = c("BoxCox"))
+lm_train.time = proc.time() - current.time
+summary(linear.mod)
+```
+
+#### Residuals for lm
+```{r}
+par(mfrow = c(2,2))
+plot(linear.mod$finalModel)
+```
+
+## Non-Linear Models
+
+### SVM
+```{r}
+current.time = proc.time()
+svm.mod = caret::train(PH~., 
+                       data = train, 
+                       method="svmRadial", 
+                       preProc=c("center", "scale"),
+                       trControl=trainControl(method="repeatedcv", number=10, repeats=3),
+                       tuneLength = 10
+                       )
+svm_train.time = proc.time() - current.time
+svm.mod
+```
+
+#### RMSE vs Cost
+```{r}
+plot(svm.mod)
+```
+
+### kNN
+```{r}
+current.time = proc.time()
+knn.mod = caret::train(PH~., 
+                       data = train, 
+                       method="knn",
+                       preProc=c("center", "scale"),
+                       trControl=trainControl(method="repeatedcv", number=10, repeats=3)
+                       )
+knn_train.time = proc.time() - current.time
+knn.mod
+```
+
+
+```{r}
+plot(knn.mod)
+```
+
+## Trees
+
+### Random Forest
+```{r}
+current.time = proc.time()
+rf.mod = caret::train(PH~., 
+                          data = train, 
+                          method = "rf" ,
+                          preProc=c("center", "scale"),
+                          trControl=trainControl(method="repeatedcv", number=10, repeats=3)
+                          )
+rf_train.time = proc.time() - current.time
+rf.mod
+```
+
+```{r}
+plot(rf.mod)
+```
+
+### Ranger
+```{r}
+current.time = proc.time()
+ranger.mod = caret::train(PH~., 
+                          data = train, 
+                          method = "ranger" ,
+                          preProc=c("center", "scale"),
+                          importance = "impurity",
+                          trControl=trainControl(method="repeatedcv", number=10, repeats=3)
+                          )
+ranger_train.time = proc.time() - current.time
+ranger.mod
+```
+
+```{r}
+plot(ranger.mod)
+```
+
+### Boost
+```{r,warning=FALSE}
+current.time = proc.time()
+boost.mod = caret::train(PH~., 
+                          data = train, 
+                          method = "xgbTree",
+                          preProc=c("center", "scale"),
+                          importance = "impurity",
+                          trControl=trainControl(method="repeatedcv", number=10, repeats=3)
+                          )
+boost_train.time = proc.time() - current.time
+boost.mod
+```
+
+```{r}
+plot(boost.mod)
+```
+
+# Test Models
+
+### Time to Train
+```{r}
+model_names = as.data.frame( c("lm", "SVM", "KNN", "Ranger", "rf", "Boost") )
+model_train_times = as.data.frame( c(lm_train.time[3], 
+                                     svm_train.time[3], 
+                                     knn_train.time[3], 
+                                     ranger_train.time[3], 
+                                     rf_train.time[3], 
+                                     boost_train.time[3] 
+                                     )
+                                   )
+model_train.times = cbind( model_names, model_train_times)
+colnames(model_train.times) = c("Model", "Elapsed Time")
+
+#plot
+ggplot( model_train.times, aes(x=Model, y=`Elapsed Time`, fill = Model) ) + 
+  geom_bar(stat="identity") +
+  coord_flip() +
+  theme_classic()
+```
+
+### RMSE, RSquared, MAE
+```{r}
+# RMSE
+#lm
+lm.score = postResample(predict(linear.mod, newdata = test), test$PH)
+
+#SVM
+SVM.score = postResample(predict(svm.mod, newdata = test), test$PH)
+
+#KNN 
+KNN.score = postResample(predict(knn.mod, newdata = test), test$PH)
+
+#rf
+rf.score = postResample(predict(rf.mod, newdata = test), test$PH)
+
+#Ranger
+ranger.score = postResample(predict(ranger.mod, newdata = test), test$PH)
+
+#Boost
+boost.score = postResample(predict(boost.mod, newdata = test), test$PH)
+
+#r bind RMSE, R2 and MAE
+models.metrics = cbind( as.data.frame( c("lm", "SVM", "KNN", "Ranger", "rf", "Boost") ), 
+       as.data.frame( rbind(lm.score, SVM.score, KNN.score, ranger.score, rf.score, boost.score) ),
+       row.names = NULL
+       )
+colnames(models.metrics) = c("Model", "RMSE", "RSquared", "MAE")
+```
+
+### Display - RMSE
+```{r}
+test_rmse = ggplot( models.metrics, aes(x=Model, y=RMSE, fill = Model) ) + 
+  geom_bar(stat="identity") +
+  ggtitle("RMSE by Model") +
+  geom_text( aes( label=round(RMSE,4) ), vjust=-0.5 ) +
+  theme_classic()
+test_rmse
+```
+
+#Display - RSquared
+```{r}
+test_rsquared = ggplot( models.metrics, aes(x=Model, y=RSquared, fill = Model) ) + 
+  geom_bar(stat="identity") +
+  ggtitle("R-Squared by Model") +
+  geom_text( aes( label=round(RSquared,4) ), vjust=-0.5 ) +
+  theme_classic()
+test_rsquared
+```
+
+#Display - MAE
+```{r}
+test_mae = ggplot( models.metrics, aes(x=Model, y=MAE, fill = Model) ) + 
+  geom_bar(stat="identity") +
+  ggtitle("MAE by Model") +
+  geom_text( aes( label=round(MAE,4) ), vjust=-0.5 ) +
+  theme_classic()
+test_mae
+```
+
+### Variable Importance - lm, kNN, SVM and Ranger
+```{r}
+par(mfrow=c(2,2))
+plot(varImp(linear.mod), top=10, main="lm")
+plot(varImp(knn.mod), top=10, main="kNN")
+plot(varImp(svm.mod), top=10, main="SVM")
+plot(varImp(ranger.mod), top=10, main="Ranger")
+plot(varImp(rf.mod), top=10, main="rf")
+plot(varImp(boost.mod), top=10, main="Boost")
+
+```
+
+### Predict vs Actual Values
+```{r}
+#create table
+pred_actual = cbind( data.frame(predict(ranger.mod, newdata = test), row.names = NULL),
+       test$PH
+)
+colnames(pred_actual) = c("Predicted", "Actual")
+#MAE field
+pred_actual = pred_actual %>%
+  mutate(`Absolute Error` = abs(Predicted - Actual))
+
+#plot
+ggplot(pred_actual) + 
+  geom_point( aes(x=Predicted, y=Actual, color = `Absolute Error`) ) +
+  ggtitle("Ranger: Actual vs Predicted") +
+  theme_classic()
+```
+
+
+```{r}
+ranger.mod$finalModel
+```
+
+# Predictions on Eval Dataset
+
+### Load Eval Data
+```{r}
+# load data
+eval = read.csv("https://raw.githubusercontent.com/hvasquez81/Data-624/master/Project%202/StudentEvaluation-%20TO%20PREDICT.csv")
+head(eval)
+```
+
+### Eval Data Manipulation and Preprocessing
+```{r}
+#drop the pH column
+eval = eval %>%
+  dplyr::select(-PH)
+#replace blank brand code with E for empty
+eval$Brand.Code = as.character(eval$Brand.Code)
+eval$Brand.Code[is.na(eval$Brand.Code)] = "E"
+eval$Brand.Code[eval$Brand.Code == ""] = "E"
+eval$Brand.Code = as.factor(eval$Brand.Code)
+
+#create new variable
+eval = eval %>%
+  mutate(HydPressureRecorded123 =ifelse( ( (!is.na(Hyd.Pressure1) & Hyd.Pressure1 !=0 ) |
+                                            (!is.na(Hyd.Pressure2) & Hyd.Pressure2 !=0 ) |
+                                              (!is.na(Hyd.Pressure3) & Hyd.Pressure3 !=0 ) ), 1, 0)
+  )
+
+#change to factor
+eval$HydPressureRecorded123 = as.factor(eval$HydPressureRecorded123)
+
+#apply replace NA function on non-categorical variables
+eval[, !( colnames(eval) %in% c('Brand.Code', 'HydPressureRecorded123') ) ] = replace(eval[, !( colnames(eval) %in% c('Brand.Code', 'HydPressureRecorded123') ) ], TRUE, lapply(eval[, !( colnames(eval) %in% c('Brand.Code', 'HydPressureRecorded123') ) ], NA_replace ))
+head(eval)
+```
+
+### Use Ranger to Predict on Eval set
+```{r}
+#store the predictions as a new row named PH_RANGER_PREDICTION and add the original PH column back
+eval = eval %>% mutate(PH_RANGER_PREDICTION = predict(ranger.mod, newdata = eval),
+                PH = NA)
+
+#write file as CSV to send off
+#write.csv(eval, "Group5_pH_Eval_Predictions.csv")
+```
+
+#Sources
+https://rdrr.io/cran/caret/man/models.html
+http://www.rebeccabarter.com/blog/2017-11-17-caret_tutorial/
+https://cran.r-projecZt.org/web/packages/ranger/ranger.pdf
+https://cran.r-project.org/web/packages/xgboost/vignettes/xgboost.pdf
+
+
